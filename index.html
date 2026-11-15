@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-html{color-scheme:light}body{margin:0}
+html{color-scheme:light}body{margin:0}[hidden]{display:none!important}
 
 /* Layout: sticky header with progress, tab bar, then collapsible checklists. Calm utilitarian tracker; teal marks done, amber/red mark difficulty. */
 :root{
@@ -106,6 +106,15 @@ li.row.done .name{color:var(--muted);text-decoration:line-through;text-decoratio
 .goals{display:flex;gap:10px 14px;flex-wrap:wrap;align-items:center;font-size:.9rem}
 .goals input{width:72px;font:400 .9rem var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .goals input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.nbtn{font:500 .8rem var(--sans);color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:1px 8px;cursor:pointer}
+.nbtn:hover{color:var(--fg)}
+.nbtn.has{color:var(--accent);border-color:var(--accent)}
+.nbtn[aria-expanded="true"]{background:var(--surface2)}
+.nbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes{padding:0 14px 12px 44px}
+.card .notes{padding:0 0 12px 30px}
+.notes textarea{display:block;width:100%;min-height:7.5em;max-height:26em;resize:vertical;field-sizing:content;font:400 .9rem/1.5 var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.notes textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 li.row input[data-tid]{position:absolute;opacity:0;pointer-events:none}
 li.row input[data-sdday]{position:absolute;opacity:0;pointer-events:none}
 @media (max-width:520px){
@@ -397,6 +406,9 @@ var SDDAYS = {};                   /* dates on which you did your system design 
 var GOALS = { lc: 2, sd: 30 };     /* daily goals: problems, minutes */
 var TIMER = { end: 0, left: 0, running: false, iv: null };
 var RENDERED_DAY = "";
+var NOTES = {};                    /* problem slug -> your note text */
+var OPENN = {};                    /* problem slug -> true while its note box is open */
+var NOTE_MAX = 8000;               /* characters per note */
 var LS = "prep-done-v1";
 var remote = { doc: null, timer: null, busy: false, dirty: false, first: true };
 
@@ -431,15 +443,25 @@ function slug(name){
   if(SLUG_FIX[name]) return SLUG_FIX[name];
   return name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
 }
+function noteBtn(key){
+  var has = !!NOTES[key];
+  return '<button type="button" class="nbtn'+(has?' has':'')+'" data-notebtn="'+key+'" aria-expanded="'+(OPENN[key]?'true':'false')+'">'+(has?'Notes •':'Notes')+'</button>';
+}
+function notePanel(key, name, ctx){
+  /* The first newline after <textarea> is dropped by the HTML parser, so one is added to keep a note that starts with a blank line intact. */
+  return '<div class="notes" data-notepanel="'+key+'"'+(OPENN[key]?'':' hidden')+'><textarea id="note-'+ctx+'-'+key+'" data-note="'+key+'" maxlength="'+NOTE_MAX+'" rows="5" aria-label="Notes for '+esc(name)+'" placeholder="Key idea, what tripped you up, time and space complexity...">\n'+esc(NOTES[key]||"")+'</textarea></div>';
+}
 function row(id, name, hint, diff){
-  var meta = "";
+  var meta = "", panel = "";
   if(diff){
+    var key = slug(name);
     meta = '<span class="meta"><span class="d '+diff+'" title="'+({E:"Easy",M:"Medium",H:"Hard"})[diff]+'">'+diff+'</span>'
-      + '<a href="https://leetcode.com/problems/'+slug(name)+'/" target="_blank" rel="noopener">Open</a></span>';
+      + '<a href="https://leetcode.com/problems/'+key+'/" target="_blank" rel="noopener">Open</a>'+noteBtn(key)+'</span>';
+    panel = notePanel(key, name, "n");
   }
   return '<li class="row'+(DONE.has(id)?' done':'')+'"><label><input type="checkbox" data-id="'+id+'"'+(DONE.has(id)?' checked':'')+'>'
     + '<span class="box"></span><span class="txt"><span class="name">'+esc(name)+'</span>'
-    + (hint?'<span class="hint">'+esc(hint)+'</span>':'')+'</span>'+meta+'</label></li>';
+    + (hint?'<span class="hint">'+esc(hint)+'</span>':'')+'</span>'+meta+'</label>'+panel+'</li>';
 }
 function group(gid, title, learn, rowsHtml, open){
   return '<details data-group="'+gid+'"'+(open?' open':'')+'><summary><span class="t">'+esc(title)+'</span><span class="c"></span><span class="bar"><i></i></span></summary>'
@@ -507,7 +529,45 @@ function refresh(){
   document.getElementById("s-sd").textContent = tot.sd[0]+" / "+tot.sd[1];
   document.getElementById("b-sd").style.width = pct(tot.sd[0], tot.sd[1])+"%";
   renderToday();
+  syncNotes();
 }
+
+/* ---------- NOTES ---------- */
+/* Brings every Notes button and text box (Today tab and NeetCode tab) in line with NOTES and OPENN. */
+function syncNotes(){
+  document.querySelectorAll("[data-notepanel]").forEach(function(p){
+    p.hidden = !OPENN[p.getAttribute("data-notepanel")];
+  });
+  document.querySelectorAll("[data-notebtn]").forEach(function(b){
+    var k = b.getAttribute("data-notebtn"), has = !!NOTES[k];
+    b.classList.toggle("has", has);
+    b.textContent = has ? "Notes •" : "Notes";
+    b.setAttribute("aria-expanded", OPENN[k] ? "true" : "false");
+  });
+  document.querySelectorAll("textarea[data-note]").forEach(function(t){
+    var v = NOTES[t.getAttribute("data-note")] || "";
+    if(t !== document.activeElement && t.value !== v) t.value = v;
+  });
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest && e.target.closest("[data-notebtn]");
+  if(!b) return;
+  var k = b.getAttribute("data-notebtn");
+  OPENN[k] = !OPENN[k];
+  syncNotes();
+  if(OPENN[k]){
+    var li = b.closest("li"), ta = li && li.querySelector("textarea");
+    if(ta){ ta.focus(); }
+  }
+});
+document.addEventListener("input", function(e){
+  var ta = e.target;
+  if(!ta.matches || !ta.matches("textarea[data-note]")) return;
+  var k = ta.getAttribute("data-note");
+  if(ta.value.trim()) NOTES[k] = ta.value; else delete NOTES[k];
+  lsSave();
+  syncNotes();
+});
 
 function toggle(id, on){
   if(on){ DONE.add(id); LOG[id] = today(); } else { DONE.delete(id); delete LOG[id]; }
@@ -543,7 +603,7 @@ var resetBtn = document.getElementById("reset"), resetTimer;
 resetBtn.addEventListener("click", function(){
   if(resetBtn.getAttribute("data-armed") !== "1"){
     resetBtn.setAttribute("data-armed","1");
-    resetBtn.textContent = "Click again to clear everything";
+    resetBtn.textContent = "Click again: clears checkmarks and history, keeps notes";
     resetTimer = setTimeout(function(){ resetBtn.removeAttribute("data-armed"); resetBtn.textContent = "Clear all progress"; }, 4000);
     return;
   }
@@ -556,14 +616,31 @@ resetBtn.addEventListener("click", function(){
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
 function dkey(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
 function today(){ return dkey(new Date()); }
-function getExtra(){ return { log: LOG, sd: Object.keys(SDDAYS).sort(), goals: GOALS }; }
+function sortedNotes(src){
+  var out = {};
+  Object.keys(src || {}).sort().forEach(function(k){
+    if(typeof src[k] === "string" && src[k].trim()) out[k] = src[k].slice(0, NOTE_MAX);
+  });
+  return out;
+}
+function getExtra(){ return { log: LOG, sd: Object.keys(SDDAYS).sort(), goals: GOALS, notes: sortedNotes(NOTES) }; }
 function extraSig(x){
   x = x || {};
-  var log = x.log || {}, sd = (x.sd || []).slice().sort(), g = x.goals || {};
-  return JSON.stringify([Object.keys(log).sort().map(function(k){ return [k, log[k]]; }), sd, g.lc, g.sd]);
+  var log = x.log || {}, sd = (x.sd || []).slice().sort(), g = x.goals || {}, n = sortedNotes(x.notes);
+  return JSON.stringify([Object.keys(log).sort().map(function(k){ return [k, log[k]]; }), sd, g.lc, g.sd,
+    Object.keys(n).map(function(k){ return [k, n[k]]; })]);
 }
 function applyGoals(g){
   if(g && g.lc > 0 && g.sd > 0) GOALS = { lc: g.lc, sd: g.sd };
+}
+/* Keep both versions of a note when two devices edited it; never drop text. */
+function mergeNote(local, remote){
+  if(!local) return remote;
+  if(!remote) return local;
+  var a = local.trim(), b = remote.trim();
+  if(a === b || a.indexOf(b) >= 0) return local;
+  if(b.indexOf(a) >= 0) return remote;
+  return (local + "\n\n--- from another device ---\n\n" + remote).slice(0, NOTE_MAX);
 }
 function mergeExtra(x){
   if(!x) return;
@@ -571,6 +648,8 @@ function mergeExtra(x){
   for(var k in log) if(!(k in LOG)) LOG[k] = log[k];
   (x.sd || []).forEach(function(d){ SDDAYS[d] = true; });
   applyGoals(x.goals);
+  var rn = sortedNotes(x.notes);
+  for(var n in rn) NOTES[n] = mergeNote(NOTES[n], rn[n]);
 }
 function replaceExtra(x){
   x = x || {};
@@ -578,6 +657,8 @@ function replaceExtra(x){
   SDDAYS = {};
   (x.sd || []).forEach(function(d){ SDDAYS[d] = true; });
   applyGoals(x.goals);
+  /* A file saved before notes existed has no notes key; keep what is here instead of wiping it. */
+  if(x.notes && typeof x.notes === "object") NOTES = sortedNotes(x.notes);
 }
 function extraLoad(){
   try{ var x = JSON.parse(localStorage.getItem("prep-extra-v1") || "null"); if(x) replaceExtra(x); }catch(e){}
@@ -597,11 +678,12 @@ function sdList(){
   return out;
 }
 function trow(it){
-  var on = DONE.has(it.id);
-  var meta = it.d ? '<span class="meta"><span class="d '+it.d+'">'+it.d+'</span><a href="https://leetcode.com/problems/'+slug(it.name)+'/" target="_blank" rel="noopener">Open</a></span>' : "";
+  var on = DONE.has(it.id), key = it.d ? slug(it.name) : "";
+  var meta = it.d ? '<span class="meta"><span class="d '+it.d+'">'+it.d+'</span><a href="https://leetcode.com/problems/'+key+'/" target="_blank" rel="noopener">Open</a>'+noteBtn(key)+'</span>' : "";
+  var panel = it.d ? notePanel(key, it.name, "t") : "";
   var sub = esc(it.topic) + (it.hint ? " &middot; " + esc(it.hint) : "");
   return '<li class="row'+(on?' done':'')+'"><label><input type="checkbox" data-tid="'+it.id+'"'+(on?' checked':'')+'>'
-    + '<span class="box"></span><span class="txt"><span class="name">'+esc(it.name)+'</span><span class="hint">'+sub+'</span></span>'+meta+'</label></li>';
+    + '<span class="box"></span><span class="txt"><span class="name">'+esc(it.name)+'</span><span class="hint">'+sub+'</span></span>'+meta+'</label>'+panel+'</li>';
 }
 function dayStats(key){
   var n = 0;
@@ -694,7 +776,16 @@ function renderToday(){
      + '<input type="number" id="gLc" min="1" max="20" value="'+GOALS.lc+'">'
      + '<label for="gSd">System design minutes</label><input type="number" id="gSd" min="5" max="240" value="'+GOALS.sd+'"></div></div>';
 
+  /* Re-drawing this tab must not knock you out of a note you are typing (for example when the timer finishes). */
+  var ae = document.activeElement, fk = null, ss = 0, se = 0;
+  if(ae && ae.matches && ae.matches("textarea[data-note]") && host.contains(ae)){
+    fk = ae.getAttribute("data-note"); ss = ae.selectionStart; se = ae.selectionEnd;
+  }
   host.innerHTML = h;
+  if(fk){
+    var nt = host.querySelector('textarea[data-note="'+fk+'"]');
+    if(nt){ nt.focus(); try{ nt.setSelectionRange(ss, se); }catch(err){} }
+  }
   timerTick();
 }
 
@@ -834,6 +925,17 @@ showTab(location.hash.slice(1));
     return "GitHub returned an error ("+status+"). Your progress is still saved in this browser.";
   }
 
+  /* GitHub wants base64 of UTF-8 bytes. Plain btoa/atob break on emoji and curly quotes, which notes can contain. */
+  function b64enc(str){
+    var bytes = new TextEncoder().encode(str), bin = "";
+    for(var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function b64dec(b64){
+    var bin = atob(b64.replace(/\s/g, "")), bytes = new Uint8Array(bin.length);
+    for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
   async function pull(){
     var r = await fetch(url()+"?ref=main&t="+Date.now(), { headers: headers(), cache: "no-store" });
     if(r.status === 404){
@@ -844,13 +946,13 @@ showTab(location.hash.slice(1));
     }
     if(!r.ok){ var e2 = new Error("pull"); e2.status = r.status; throw e2; }
     var j = await r.json(); GH.sha = j.sha;
-    var d = JSON.parse(atob(j.content.replace(/\s/g, "")));
-    GH.rx = { log: d.log, sd: d.sd, goals: d.goals };
+    var d = JSON.parse(b64dec(j.content));
+    GH.rx = { log: d.log, sd: d.sd, goals: d.goals, notes: d.notes };
     return Array.isArray(d.done) ? d.done.filter(function(x){ return typeof x === "string"; }) : [];
   }
   async function put(){
     var body = { message: "Update progress", branch: "main",
-      content: btoa(JSON.stringify(Object.assign({ done: Array.from(DONE).sort() }, getExtra()), null, 1)) };
+      content: b64enc(JSON.stringify(Object.assign({ done: Array.from(DONE).sort() }, getExtra()), null, 1)) };
     if(GH.sha) body.sha = GH.sha;
     var r = await fetch(url(), { method: "PUT", headers: headers({ "Content-Type":"application/json" }), body: JSON.stringify(body) });
     if(!r.ok){ var e = new Error("put"); e.status = r.status; throw e; }
@@ -937,6 +1039,8 @@ showTab(location.hash.slice(1));
     pull().then(function(remote){
       if(GH.dirty || GH.sha === null) return;
       DONE = new Set(remote); replaceExtra(GH.rx); baseSave(); refresh(); setSync("Synced to GitHub");
+      /* The file on GitHub has no notes (an older copy of the page wrote it) but some exist here: put them back. */
+      if(Object.keys(sortedNotes(NOTES)).length && !(GH.rx && GH.rx.notes)) ghQueue();
     }).catch(function(){});
   });
 
