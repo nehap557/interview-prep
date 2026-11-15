@@ -822,7 +822,13 @@ function renderToday(){
     }
     renderToday();
   });
-  setInterval(function(){ if(RENDERED_DAY && RENDERED_DAY !== today()) renderToday(); }, 60000);
+  /* Move to the new day as soon as the tab is looked at again, not only on the next timer tick: a tab that was frozen, restored or
+     woken from sleep can still be showing yesterday's view. */
+  function checkDay(){ if(RENDERED_DAY && RENDERED_DAY !== today()) renderToday(); }
+  document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") checkDay(); });
+  window.addEventListener("focus", checkDay);
+  window.addEventListener("pageshow", checkDay);
+  setInterval(checkDay, 30000);
 })();
 
 /* ---------- BOOT ---------- */
