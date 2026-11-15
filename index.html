@@ -615,7 +615,10 @@ resetBtn.addEventListener("click", function(){
 /* ---------- TODAY TAB ---------- */
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
 function dkey(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
-function today(){ return dkey(new Date()); }
+/* Your study day turns over at 4 AM, not midnight, so a session that runs past 12 still counts for the day you started it. */
+var DAY_START_HOUR = 4;
+function studyNow(){ return new Date(Date.now() - DAY_START_HOUR * 3600000); }
+function today(){ return dkey(studyNow()); }
 function sortedNotes(src){
   var out = {};
   Object.keys(src || {}).sort().forEach(function(k){
@@ -711,11 +714,11 @@ function renderToday(){
   var next = pending.slice(0, left > 0 ? left : 1);
   var sdPending = sdl.filter(function(it){ return !DONE.has(it.id); });
   var sdOk = !!SDDAYS[t];
-  var now = new Date();
+  var now = studyNow();
   var dstr = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
   var h = '<div class="today-h"><h2 style="margin:0">'+esc(dstr)+'</h2></div>'
-    + '<p class="note" style="margin-top:6px">Missed a day? Nothing to make up. This page always shows the next unchecked items, so just do today.</p>';
+    + '<p class="note" style="margin-top:6px">Missed a day? Nothing to make up. This page always shows the next unchecked items, so just do today. Your day resets at 4 AM, so late-night sessions count for the day you started.</p>';
 
   /* Coding card */
   var shown = Math.min(doneToday.length, goal);
