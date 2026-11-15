@@ -13,6 +13,7 @@
   "sd": 30
  },
  "notes": {
-  "contains-duplicate": "Make sure to consider that there is an easier way to solve this than a hashmap? Also explain brute force"
+  "contains-duplicate": "Make sure to consider that there is an easier way to solve this than a hashmap? Also explain brute force",
+  "valid-anagram": "See past the hashmaps, and think about other ways to make it more simple..."
  }
 }
